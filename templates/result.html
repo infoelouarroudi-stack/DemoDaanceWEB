@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Résultat</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    a { margin-right: 12px; }
+  </style>
+</head>
+<body>
+  <h2>Résultat</h2>
+
+  <video width="900" controls>
+    <source src="{{ url_for('static', filename='outputs/' + filename) }}" type="video/mp4">
+    Ton navigateur ne supporte pas la lecture mp4.
+  </video>
+
+  <p>
+    <a href="{{ url_for('download', filename=filename) }}">Télécharger</a>
+    <a href="{{ url_for('index') }}">Retour</a>
+  </p>
+</body>
+</html>
