@@ -251,10 +251,26 @@ class GenNNSkeImToImage(nn.Module):
         )
        
         # Decoder
-        self.dec1 = nn.ConvTranspose2d(512, 256, 4, 2, 1) # -> 8x8
-        self.dec2 = nn.ConvTranspose2d(512, 128, 4, 2, 1) # -> 16x16
-        self.dec3 = nn.ConvTranspose2d(256, 64, 4, 2, 1) # -> 32x32
-        self.dec4 = nn.ConvTranspose2d(128, 3, 4, 2, 1) # -> 64x64
+        self.up1 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.dec1 = nn.Sequential(
+            nn.Conv2d(512, 256, 3, 1, 1),
+            nn.BatchNorm2d(256)
+        ) # -> 8x8
+        
+        self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.dec2 = nn.Sequential(
+            nn.Conv2d(512, 128, 3, 1, 1),
+            nn.BatchNorm2d(128)
+        ) # -> 16x16
+        
+        self.up3 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.dec3 = nn.Sequential(
+            nn.Conv2d(256, 64, 3, 1, 1),
+            nn.BatchNorm2d(64)
+        ) # -> 32x32
+        
+        self.up4 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.dec4 = nn.Conv2d(128, 3, 3, 1, 1) # -> 64x64
        
         self.relu = nn.LeakyReLU(0.2, inplace=True)
         self.tanh = nn.Tanh()
@@ -272,16 +288,20 @@ class GenNNSkeImToImage(nn.Module):
         bottleneck = self.bottleneck(e4)
        
         # Decoder (avec Skip Connections)
-        d1 = self.relu(self.dec1(bottleneck))
+        d1 = self.up1(bottleneck)
+        d1 = self.relu(self.dec1(d1))
         d1 = torch.cat([d1, e3], dim=1)
         
-        d2 = self.relu(self.dec2(d1))
+        d2 = self.up2(d1)
+        d2 = self.relu(self.dec2(d2))
         d2 = torch.cat([d2, e2], dim=1)
 
-        d3 = self.relu(self.dec3(d2))
+        d3 = self.up3(d2)
+        d3 = self.relu(self.dec3(d3))
         d3 = torch.cat([d3, e1], dim=1)
 
-        img = self.tanh(self.dec4(d3))
+        d4 = self.up4(d3)
+        img = self.tanh(self.dec4(d4))
         return img
 
 

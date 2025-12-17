@@ -174,6 +174,6 @@ if __name__ == '__main__':
     # 2: vanilla (26->img)
     # 3: vanilla (stick->img)
     # 4: GAN
-    GEN_TYPE =1
+    GEN_TYPE =2
     ddemo = DanceDemo("data/taichi2.mp4", GEN_TYPE)
     ddemo.draw()
