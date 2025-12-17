@@ -116,7 +116,24 @@ def init_weights(m):
         nn.init.constant_(m.bias.data, 0)
 
 
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels):
+        super(ResidualBlock, self).__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(in_channels),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(in_channels)
+        )
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
 
+    def forward(self, x):
+        residual = x
+        out = self.block(x)
+        out += residual
+        out = self.relu(out)
+        return out
 
 
 class GenNNSke26ToImage(nn.Module):
@@ -135,22 +152,26 @@ class GenNNSke26ToImage(nn.Module):
        
         self.model = nn.Sequential(
             nn.BatchNorm2d(256),
-            nn.ReLU(True),
+            nn.LeakyReLU(0.2, True),
+            ResidualBlock(256),
            
             # 4x4 -> 8x8
             nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
-            nn.ReLU(True),
+            nn.LeakyReLU(0.2, True),
+            ResidualBlock(128),
            
             # 8x8 -> 16x16
             nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(True),
+            nn.LeakyReLU(0.2, True),
+            ResidualBlock(64),
            
             # 16x16 -> 32x32
             nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(32),
-            nn.ReLU(True),
+            nn.LeakyReLU(0.2, True),
+            ResidualBlock(32),
            
             # 32x32 -> 64x64
             nn.ConvTranspose2d(32, 3, kernel_size=4, stride=2, padding=1),
@@ -171,6 +192,41 @@ class GenNNSke26ToImage(nn.Module):
 
 
 
+
+class SelfAttention(nn.Module):
+    """ Self attention Layer"""
+    def __init__(self, in_dim):
+        super(SelfAttention, self).__init__()
+        self.chanel_in = in_dim
+        self.query_conv = nn.Conv2d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels=in_dim, out_channels=in_dim, kernel_size=1)
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, x):
+        """
+            inputs :
+                x : input feature maps( B X C X W X H)
+            returns :
+                out : self attention value + input feature
+                attention: B X N X N (N is Width*Height)
+        """
+        m_batchsize, C, width, height = x.size()
+        proj_query = self.query_conv(x).view(m_batchsize, -1, width * height).permute(0, 2, 1)
+        proj_key = self.key_conv(x).view(m_batchsize, -1, width * height)
+        energy = torch.bmm(proj_query, proj_key)
+        attention = self.softmax(energy)
+        proj_value = self.value_conv(x).view(m_batchsize, -1, width * height)
+
+        out = torch.bmm(proj_value, attention.permute(0, 2, 1))
+        out = out.view(m_batchsize, C, width, height)
+
+        out = self.gamma * out + x
+        return out
+
+
 class GenNNSkeImToImage(nn.Module):
     """ class that Generate a new image from from THE IMAGE OF the new skeleton posture
        SkeletonImage is an image with the skeleton drawed on it
@@ -184,13 +240,21 @@ class GenNNSkeImToImage(nn.Module):
         self.enc1 = nn.Conv2d(3, 64, 4, 2, 1) # -> 32x32
         self.enc2 = nn.Conv2d(64, 128, 4, 2, 1) # -> 16x16
         self.enc3 = nn.Conv2d(128, 256, 4, 2, 1) # -> 8x8
+        self.attn = SelfAttention(256)
         self.enc4 = nn.Conv2d(256, 512, 4, 2, 1) # -> 4x4
+        
+        # Bottleneck with stacked residual blocks
+        self.bottleneck = nn.Sequential(
+            ResidualBlock(512),
+            ResidualBlock(512),
+            ResidualBlock(512)
+        )
        
         # Decoder
         self.dec1 = nn.ConvTranspose2d(512, 256, 4, 2, 1) # -> 8x8
-        self.dec2 = nn.ConvTranspose2d(256, 128, 4, 2, 1) # -> 16x16
-        self.dec3 = nn.ConvTranspose2d(128, 64, 4, 2, 1) # -> 32x32
-        self.dec4 = nn.ConvTranspose2d(64, 3, 4, 2, 1) # -> 64x64
+        self.dec2 = nn.ConvTranspose2d(512, 128, 4, 2, 1) # -> 16x16
+        self.dec3 = nn.ConvTranspose2d(256, 64, 4, 2, 1) # -> 32x32
+        self.dec4 = nn.ConvTranspose2d(128, 3, 4, 2, 1) # -> 64x64
        
         self.relu = nn.LeakyReLU(0.2, inplace=True)
         self.tanh = nn.Tanh()
@@ -201,13 +265,22 @@ class GenNNSkeImToImage(nn.Module):
         e1 = self.relu(self.enc1(x))
         e2 = self.relu(self.enc2(e1))
         e3 = self.relu(self.enc3(e2))
-        bottleneck = self.relu(self.enc4(e3))
+        e3 = self.attn(e3)
+        e4 = self.relu(self.enc4(e3))
+        
+        # Apply bottleneck residual blocks
+        bottleneck = self.bottleneck(e4)
        
-        # Decoder (avec Skip Connections implicites si on voulait faire mieux, mais restons simple)
+        # Decoder (avec Skip Connections)
         d1 = self.relu(self.dec1(bottleneck))
+        d1 = torch.cat([d1, e3], dim=1)
+        
         d2 = self.relu(self.dec2(d1))
+        d2 = torch.cat([d2, e2], dim=1)
+
         d3 = self.relu(self.dec3(d2))
-       
+        d3 = torch.cat([d3, e1], dim=1)
+
         img = self.tanh(self.dec4(d3))
         return img
 
@@ -224,6 +297,8 @@ class GenVanillaNN():
     def __init__(self, videoSke, loadFromFile=False, optSkeOrImage=1):
         image_size = 64
         self.optSkeOrImage = optSkeOrImage # On garde l'option en mémoire
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        print(f"GenVanillaNN: device={self.device}")
        
         if optSkeOrImage==1:        # skeleton_dim26 to image
             print("Architecture: GenNNSke26ToImage (Vecteur -> Image)")
@@ -254,14 +329,16 @@ class GenVanillaNN():
        
         if loadFromFile and os.path.isfile(self.filename):
             print("GenVanillaNN: Load=", self.filename)
-            self.netG.load_state_dict(torch.load(self.filename))
+            self.netG.load_state_dict(torch.load(self.filename, map_location=self.device))
+        
+        self.netG.to(self.device)
 
 
 
     def train(self, n_epochs=20):
         # TP-TODO: Boucle d'entraînement standard
         optimizer = torch.optim.Adam(self.netG.parameters(), lr=0.0002, betas=(0.5, 0.999))
-        criterion = nn.MSELoss() # L2 Loss
+        criterion = nn.MSELoss()
        
         self.netG.train()
         print(f"Début de l'entraînement pour {n_epochs} epochs...")
@@ -269,6 +346,7 @@ class GenVanillaNN():
         for epoch in range(n_epochs):
             running_loss = 0.0
             for i, (ske_batch, img_batch) in enumerate(self.dataloader):
+                ske_batch, img_batch = ske_batch.to(self.device), img_batch.to(self.device)
                
                 optimizer.zero_grad()
                
@@ -304,11 +382,11 @@ class GenVanillaNN():
         # Ajout de la dimension Batch (1, ...)
         if self.optSkeOrImage == 1:
             # Pour Ske26, preprocess renvoie déjà un tenseur, on ajoute juste le batch
-            ske_t_batch = ske_t.unsqueeze(0)
+            ske_t_batch = ske_t.unsqueeze(0).to(self.device)
         else:
             # Pour SkeIm, preprocess applique la transformation (Image) donc on a (3, 64, 64)
             # On ajoute le batch -> (1, 3, 64, 64)
-            ske_t_batch = ske_t.unsqueeze(0)
+            ske_t_batch = ske_t.unsqueeze(0).to(self.device)
            
         with torch.no_grad():
             normalized_output = self.netG(ske_t_batch)
@@ -321,10 +399,9 @@ class GenVanillaNN():
 
 if __name__ == '__main__':
     force = False
-    optSkeOrImage = 1           # use as input a skeleton (1) or an image with a skeleton drawed (2)
-    n_epoch = 200  # Commence avec 200 pour voir un bon résultat
+    optSkeOrImage = 1
+    n_epoch = 150
     train = 1 # Met à 1 pour entraîner
-    #train = False
 
 
     if len(sys.argv) > 1:
@@ -346,14 +423,14 @@ if __name__ == '__main__':
         # On spécifie optSkeOrImage ici
         gen = GenVanillaNN(targetVideoSke, loadFromFile=False, optSkeOrImage=optSkeOrImage)
         gen.train(n_epoch)
+        print("Training completed and model saved. Exiting...")
     else:
         gen = GenVanillaNN(targetVideoSke, loadFromFile=True, optSkeOrImage=optSkeOrImage)    # load from file        
 
-
-    # Test
-    for i in range(targetVideoSke.skeCount()):
-        image = gen.generate(targetVideoSke.ske[i])
-        # Resize pour mieux voir
-        image = cv2.resize(image, (256, 256))
-        cv2.imshow('Image', image)
-        key = cv2.waitKey(-1)
+        # Test - only show images if not training
+        for i in range(targetVideoSke.skeCount()):
+            image = gen.generate(targetVideoSke.ske[i])
+            # Resize pour mieux voir
+            image = cv2.resize(image, (256, 256))
+            cv2.imshow('Image', image)
+            key = cv2.waitKey(-1)

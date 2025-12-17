@@ -87,7 +87,7 @@ class DanceDemo:
         return panel
 
     def draw(self):
-        ske = Skeleton()
+        ske = Skeleton()    
 
         # image rouge en cas d'erreur squelette
         err_panel = np.zeros((self.H, self.W_panel, 3), dtype=np.uint8)
@@ -174,6 +174,6 @@ if __name__ == '__main__':
     # 2: vanilla (26->img)
     # 3: vanilla (stick->img)
     # 4: GAN
-    GEN_TYPE = 4
+    GEN_TYPE =1
     ddemo = DanceDemo("data/taichi2.mp4", GEN_TYPE)
     ddemo.draw()

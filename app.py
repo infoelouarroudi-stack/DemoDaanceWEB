@@ -9,7 +9,7 @@ from flask import Flask, render_template, request, Response, redirect, url_for
 cv2.setNumThreads(1)
 cv2.ocl.setUseOpenCL(False)
 
-APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(APP_DIR, "src")
 sys.path.append(SRC_DIR)
 

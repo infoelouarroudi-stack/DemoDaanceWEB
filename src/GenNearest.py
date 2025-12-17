@@ -42,5 +42,5 @@ class GenNeirest:
             # Conversion en float [0,1] pour la compatibilité avec DanceDemo
             return image.astype(float) / 255.0
         else:
-            # Sécurité : si la base est vide (ne devrait pas arriver), on renvoie du blanc
+            # Fallback : si la base est vide (ne devrait pas arriver), on renvoie du blanc
             return np.ones((64, 64, 3), dtype=float)

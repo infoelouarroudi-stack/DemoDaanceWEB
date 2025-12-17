@@ -51,7 +51,6 @@ class GenGAN:
     def __init__(self, videoSke, loadFromFile=False):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # === ICI: générateur image->image ===
         self.netG = GenNNSkeImToImage().to(self.device)
         self.netD = Discriminator().to(self.device)
 
@@ -59,7 +58,6 @@ class GenGAN:
 
         image_size = 64
 
-        # IMPORTANT: entrée stickman normalisée aussi en [-1,1]
         src_transform = transforms.Compose([
             SkeToImageTransform(image_size),
             transforms.ToTensor(),
@@ -119,7 +117,7 @@ class GenGAN:
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
         return gradient_penalty
 
-    def train(self, n_epochs=50):
+    def train(self, n_epochs=5):
         lambda_gp = 10.0
         n_critic = 5
 
@@ -206,6 +204,8 @@ class GenGAN:
 
 
 if __name__ == '__main__':
+    train = True  # Set to False to only test
+    
     if len(sys.argv) > 1:
         filename = sys.argv[1]
     else:
@@ -216,17 +216,20 @@ if __name__ == '__main__':
 
     targetVideoSke = VideoSkeleton(filename)
 
-    # Si tu changes d’archi, supprime l’ancien checkpoint
-    # data/Dance/DanceGenGAN.pth
-    gen = GenGAN(targetVideoSke, loadFromFile=False)
-    gen.train(50)  # conseille 200+ si tu as le temps
+    if train:
+        gen = GenGAN(targetVideoSke, loadFromFile=False)
+        gen.train(50)
+        print("Training completed and model saved. Exiting...")
+    else:
+        gen = GenGAN(targetVideoSke, loadFromFile=True)
+        
+        # Test - only show images if not training
+        for i in range(targetVideoSke.skeCount()):
+            image = gen.generate(targetVideoSke.ske[i])
+            image = cv2.resize(image, (256, 256))
+            cv2.imshow('Image', image)
+            key = cv2.waitKey(10)
+            if key & 0xFF == ord('q'):
+                break
 
-    for i in range(targetVideoSke.skeCount()):
-        image = gen.generate(targetVideoSke.ske[i])
-        image = cv2.resize(image, (256, 256))
-        cv2.imshow('Image', image)
-        key = cv2.waitKey(10)
-        if key & 0xFF == ord('q'):
-            break
-
-    cv2.destroyAllWindows()
+        cv2.destroyAllWindows()
